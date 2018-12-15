@@ -3,10 +3,10 @@ package com.rarchives.ripme.ripper.rippers;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.UnsupportedEncodingException;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLConnection;
+import java.nio.charset.StandardCharsets;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -27,22 +27,16 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import com.rarchives.ripme.ui.RipStatusMessage;
 import com.rarchives.ripme.utils.Utils;
-import java.util.HashMap;
 
 
 public class InstagramRipper extends AbstractJSONRipper {
-    String nextPageID = "";
+    private String nextPageID = "";
     private String qHash;
     private  boolean rippingTag = false;
     private String tagName;
 
     private String userID;
     private String rhx_gis = null;
-    private String csrftoken;
-    // Run into a weird issue with Jsoup cutting some json pages in half, this is a work around
-    // see https://github.com/RipMeApp/ripme/issues/601
-    private String workAroundJsonString;
-
 
 
     public InstagramRipper(URL url) throws IOException {
@@ -157,8 +151,6 @@ public class InstagramRipper extends AbstractJSONRipper {
         t = t.replaceAll("<html>\n" +
                 " <head></head>\n" +
                 " <body>", "");
-        t.replaceAll("</body>\n" +
-                "</html>", "");
         t = t.replaceAll("\n", "");
         t = t.replaceAll("=\"\"", "");
         return t;
@@ -188,7 +180,6 @@ public class InstagramRipper extends AbstractJSONRipper {
     public JSONObject getFirstPage() throws IOException {
         Connection.Response resp = Http.url(url).response();
         LOGGER.info(resp.cookies());
-        csrftoken = resp.cookie("csrftoken");
         Document p = resp.parse();
         // Get the query hash so we can download the next page
         qHash = getQHash(p);
@@ -218,7 +209,7 @@ public class InstagramRipper extends AbstractJSONRipper {
         return imageURL;
     }
 
-    public String getAfter(JSONObject json) {
+    private String getAfter(JSONObject json) {
         try {
             return json.getJSONObject("entry_data").getJSONArray("ProfilePage").getJSONObject(0)
                     .getJSONObject("graphql").getJSONObject("user")
@@ -246,7 +237,7 @@ public class InstagramRipper extends AbstractJSONRipper {
             rhx_gis = json.getString("rhx_gis");
         }
         if (!url.toExternalForm().contains("/p/")) {
-            JSONArray datas = new JSONArray();
+            JSONArray datas;
             if (!rippingTag) {
                 // This first try only works on data from the first page
                 try {
@@ -281,8 +272,8 @@ public class InstagramRipper extends AbstractJSONRipper {
                         try {
                             Document slideShowDoc = Http.url(new URL("https://www.instagram.com/p/" + data.getString("shortcode"))).get();
                             List<String> toAdd = getPostsFromSinglePage(getJSONFromPage(slideShowDoc));
-                            for (int slideShowInt = 0; slideShowInt < toAdd.size(); slideShowInt++) {
-                                addURLToDownload(new URL(toAdd.get(slideShowInt)), image_date + data.getString("shortcode"));
+                            for (String s : toAdd) {
+                                addURLToDownload(new URL(s), image_date + data.getString("shortcode"));
                             }
                         } catch (MalformedURLException e) {
                             LOGGER.error("Unable to download slide show, URL was malformed");
@@ -328,17 +319,15 @@ public class InstagramRipper extends AbstractJSONRipper {
         String stringToMD5 = rhx_gis + ":" + variables;
         LOGGER.debug("String to md5 is \"" + stringToMD5 + "\"");
         try {
-            byte[] bytesOfMessage = stringToMD5.getBytes("UTF-8");
+            byte[] bytesOfMessage = stringToMD5.getBytes(StandardCharsets.UTF_8);
 
             MessageDigest md = MessageDigest.getInstance("MD5");
             byte[] hash = md.digest(bytesOfMessage);
-            StringBuffer sb = new StringBuffer();
-            for (int i = 0; i < hash.length; ++i) {
-                sb.append(Integer.toHexString((hash[i] & 0xFF) | 0x100).substring(1,3));
+            StringBuilder sb = new StringBuilder();
+            for (byte hash1 : hash) {
+                sb.append(Integer.toHexString((hash1 & 0xFF) | 0x100), 1, 3);
             }
             return sb.toString();
-        } catch(UnsupportedEncodingException e) {
-            return null;
         } catch(NoSuchAlgorithmException e) {
             return null;
         }
@@ -347,10 +336,6 @@ public class InstagramRipper extends AbstractJSONRipper {
     @Override
     public JSONObject getNextPage(JSONObject json) throws IOException {
         JSONObject toreturn;
-        java.util.Map<String, String> cookies = new HashMap<String, String>();
-//        This shouldn't be hardcoded and will break one day
-        cookies.put("ig_pr", "1");
-        cookies.put("csrftoken", csrftoken);
         if (!nextPageID.equals("") && !isThisATest()) {
             if (rippingTag) {
                 try {
@@ -361,7 +346,7 @@ public class InstagramRipper extends AbstractJSONRipper {
                                      "&variables=" + vars, ig_gis);
                     // Sleep for a while to avoid a ban
                     LOGGER.info(toreturn);
-                    if (!pageHasImages(toreturn)) {
+                    if (pageHasNoImages(toreturn)) {
                         throw new IOException("No more pages");
                     }
                     return toreturn;
@@ -380,7 +365,7 @@ public class InstagramRipper extends AbstractJSONRipper {
 
                 LOGGER.info("https://www.instagram.com/graphql/query/?query_hash=" + qHash + "&variables=" + vars);
                 toreturn = getPage("https://www.instagram.com/graphql/query/?query_hash=" + qHash + "&variables=" + vars, ig_gis);
-                if (!pageHasImages(toreturn)) {
+                if (pageHasNoImages(toreturn)) {
                     throw new IOException("No more pages");
                 }
                 return toreturn;
@@ -397,14 +382,11 @@ public class InstagramRipper extends AbstractJSONRipper {
         addURLToDownload(url);
     }
 
-    private boolean pageHasImages(JSONObject json) {
+    private boolean pageHasNoImages(JSONObject json) {
         LOGGER.info(json);
         int numberOfImages = json.getJSONObject("data").getJSONObject("user")
                 .getJSONObject("edge_user_to_photos_of_you").getInt("count");
-        if (numberOfImages == 0) {
-            return false;
-        }
-        return true;
+        return numberOfImages == 0;
     }
 
     private JSONObject getPage(String url, String ig_gis) {
@@ -415,14 +397,7 @@ public class InstagramRipper extends AbstractJSONRipper {
             URLConnection connection = new URL(url).openConnection();
             connection.setRequestProperty("User-Agent", USER_AGENT);
             connection.setRequestProperty("x-instagram-gis", ig_gis);
-            BufferedReader in = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-            String line;
-            while ((line = in.readLine()) != null) {
-                sb.append(line);
-
-            }
-            in.close();
-            workAroundJsonString = sb.toString();
+            getRequestContent(connection, sb);
             return new JSONObject(sb.toString());
 
         } catch (MalformedURLException e) {
@@ -438,17 +413,11 @@ public class InstagramRipper extends AbstractJSONRipper {
     private String getQHash(Document doc) {
         String jsFileURL = "https://www.instagram.com" + doc.select("link[rel=preload]").attr("href");
         StringBuilder sb = new StringBuilder();
-        Document jsPage;
         try {
             // We can't use Jsoup here because it won't download a non-html file larger than a MB
             // even if you set maxBodySize to 0
             URLConnection connection = new URL(jsFileURL).openConnection();
-            BufferedReader in = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-            String line;
-            while ((line = in.readLine()) != null) {
-                sb.append(line);
-            }
-            in.close();
+            getRequestContent(connection, sb);
 
         } catch (MalformedURLException e) {
             LOGGER.info("Unable to get query_hash, " + jsFileURL + " is a malformed URL");
@@ -477,4 +446,12 @@ public class InstagramRipper extends AbstractJSONRipper {
 
     }
 
+    private static void getRequestContent(URLConnection connection, StringBuilder sb) throws IOException {
+        BufferedReader in = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+        String line;
+        while ((line = in.readLine()) != null) {
+            sb.append(line);
+        }
+        in.close();
+    }
 }
