@@ -227,7 +227,7 @@ public class InstagramRipper extends AbstractJSONRipper {
             // This is here so that when the user rips the last page they don't get a "end_cursor not a string" error
             try {
                 return json.getJSONObject("data").getJSONObject("user")
-                        .getJSONObject("edge_owner_to_timeline_media").getJSONObject("page_info").getString("end_cursor");
+                        .getJSONObject("edge_user_to_photos_of_you").getJSONObject("page_info").getString("end_cursor");
             } catch (JSONException t) {
                 return "";
             }
@@ -257,7 +257,7 @@ public class InstagramRipper extends AbstractJSONRipper {
                             .getJSONObject("edge_owner_to_timeline_media").getJSONArray("edges");
                 } catch (JSONException e) {
                     datas = json.getJSONObject("data").getJSONObject("user")
-                            .getJSONObject("edge_owner_to_timeline_media").getJSONArray("edges");
+                            .getJSONObject("edge_user_to_photos_of_you").getJSONArray("edges");
                 }
             } else {
                 try {
@@ -400,7 +400,7 @@ public class InstagramRipper extends AbstractJSONRipper {
     private boolean pageHasImages(JSONObject json) {
         LOGGER.info(json);
         int numberOfImages = json.getJSONObject("data").getJSONObject("user")
-                .getJSONObject("edge_owner_to_timeline_media").getJSONArray("edges").length();
+                .getJSONObject("edge_user_to_photos_of_you").getInt("count");
         if (numberOfImages == 0) {
             return false;
         }
@@ -459,7 +459,7 @@ public class InstagramRipper extends AbstractJSONRipper {
             return null;
         }
         if (!rippingTag) {
-            Pattern jsP = Pattern.compile("byUserId\\.get\\(t\\)\\)\\|\\|void 0===r\\?void 0:r\\.pagination},queryId:.([a-zA-Z0-9]+)");
+            Pattern jsP = Pattern.compile("byUserId.get\\(n\\)\\)\\|\\|void 0===o\\?void 0:o\\.pagination},queryId:\"([a-zA-Z0-9]+)\"");
             Matcher m = jsP.matcher(sb.toString());
             if (m.find()) {
                 return m.group(1);
